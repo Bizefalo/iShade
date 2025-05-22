@@ -9,31 +9,37 @@ import androidx.navigation.fragment.findNavController
 import com.example.ishade.databinding.FragmentFirstBinding
 
 /**
- * A simple [Fragment] subclass as the default destination in the navigation.
+ * Fragmento principal que actúa como pantalla de inicio.
  */
 class FirstFragment : Fragment() {
 
     private var _binding: FragmentFirstBinding? = null
-
-    // This property is only valid between onCreateView and
-    // onDestroyView.
     private val binding get() = _binding!!
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
-
         _binding = FragmentFirstBinding.inflate(inflater, container, false)
         return binding.root
-
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        binding.buttonFirst.setOnClickListener {
-            findNavController().navigate(R.id.action_FirstFragment_to_SecondFragment)
+        // Listener para el botón Modo Automático
+        binding.buttonAutomatico.setOnClickListener {
+            findNavController().navigate(R.id.action_FirstFragment_to_AutomaticFragment)
+        }
+
+        // Listener para el botón Modo Manual
+        binding.buttonManual.setOnClickListener {
+            findNavController().navigate(R.id.action_FirstFragment_to_ManualFragment)
+        }
+
+        // Listener para el botón Fijar Horario
+        binding.buttonFijarHorario.setOnClickListener {
+            findNavController().navigate(R.id.action_FirstFragment_to_ScheduleFragment)
         }
     }
 

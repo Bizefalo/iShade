@@ -8,21 +8,36 @@
     <fragment
         android:id="@+id/FirstFragment"
         android:name="com.example.ishade.FirstFragment"
-        android:label="@string/first_fragment_label"
+        android:label="Control de Cortina"
         tools:layout="@layout/fragment_first">
 
-        <action
-            android:id="@+id/action_FirstFragment_to_SecondFragment"
-            app:destination="@id/SecondFragment" />
-    </fragment>
-    <fragment
-        android:id="@+id/SecondFragment"
-        android:name="com.example.ishade.SecondFragment"
-        android:label="@string/second_fragment_label"
-        tools:layout="@layout/fragment_second">
+    <action
+        android:id="@+id/action_FirstFragment_to_AutomaticFragment"
+        app:destination="@id/AutomaticFragment" />
+    <action
+        android:id="@+id/action_FirstFragment_to_ManualFragment"
+        app:destination="@id/ManualFragment" />
+    <action
+        android:id="@+id/action_FirstFragment_to_ScheduleFragment"
+        app:destination="@id/ScheduleFragment" />
+</fragment>
 
-        <action
-            android:id="@+id/action_SecondFragment_to_FirstFragment"
-            app:destination="@id/FirstFragment" />
-    </fragment>
-</navigation>
+<fragment
+android:id="@+id/AutomaticFragment"
+android:name="com.example.ishade.AutomaticFragment"
+android:label="Modo Automático"
+tools:layout="@layout/fragment_automatic" />
+
+<fragment
+android:id="@+id/ManualFragment"
+android:name="com.example.ishade.ManualFragment"
+android:label="Modo Manual"
+tools:layout="@layout/fragment_manual" />
+
+<fragment
+android:id="@+id/ScheduleFragment"
+android:name="com.example.ishade.ScheduleFragment"
+android:label="Fijar Horario"
+tools:layout="@layout/fragment_schedule" />
+
+    </navigation>

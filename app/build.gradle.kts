@@ -10,7 +10,7 @@ android {
     defaultConfig {
         applicationId = "com.example.ishade"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 30
         versionCode = 1
         versionName = "1.0"
 
@@ -36,6 +36,10 @@ android {
     buildFeatures {
         viewBinding = true
     }
+
+    packaging {
+        resources.excludes.add("META-INF/androidx.localbroadcastmanager_localbroadcastmanager.version")
+    }
 }
 
 dependencies {
@@ -49,6 +53,11 @@ dependencies {
 
     implementation(libs.org.eclipse.paho.client.mqttv3)
     implementation(libs.org.eclipse.paho.android.service) // Servicio android
+
+    implementation(libs.localbroadcastmanager)
+    implementation("com.android.support:localbroadcastmanager:28.0.0")
+
+    implementation("com.google.code.gson:gson:2.13.1")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

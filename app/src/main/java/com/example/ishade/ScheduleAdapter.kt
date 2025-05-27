@@ -4,6 +4,7 @@ import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.example.ishade.databinding.ItemScheduleLayoutBinding // Generado por ViewBinding para item_schedule_layout.xml
+import java.util.Locale
 
 class ScheduleAdapter(
     private var schedules: List<ScheduleItem>,
@@ -16,7 +17,7 @@ class ScheduleAdapter(
     inner class ScheduleViewHolder(val binding: ItemScheduleLayoutBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind(scheduleItem: ScheduleItem) {
             binding.textviewScheduleTime.text = scheduleItem.getTimeString()
-            binding.textviewSchedulePosition.text = "${scheduleItem.positionPercent}% (${scheduleItem.getDaysString()})"
+            binding.textviewSchedulePosition.text = "${scheduleItem.positionPercent}% (${ScheduleItem.formatSelectedDays(scheduleItem.daysOfWeek, Locale.getDefault())})"
             binding.switchScheduleEnabled.isChecked = scheduleItem.isEnabled
 
             // Listener para el switch

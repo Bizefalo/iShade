@@ -11,6 +11,17 @@
     <string name="bajar_cortina">Bajar Cortina</string>
     <string name="modo_manual_desactivado">Modo Manual Desactivado</string>
 
+    <string name="manual_status_subiendo">Subiendo...</string>
+    <string name="manual_status_bajando">Bajando...</string>
+    <string name="manual_status_detenido">Movimiento Detenido</string>
+    <string name="manual_status_modo_activado">Modo Manual Activado</string>
+    <string name="manual_status_modo_desactivado">Modo Manual Desactivado</string>
+    <string name="broker_desconectado">Broker Desconectado</string>
+
+    <!-- Fragment Automatic -->
+    <string name="auto_mode_activated">Activar Modo Automatico</string>
+    <string name="auto_mode_deactivated">Modo Automatico Desactivado</string>
+
     <!-- Strings used for fragments for navigation -->
     <string name="first_fragment_label">First Fragment</string>
     <string name="second_fragment_label">Second Fragment</string>

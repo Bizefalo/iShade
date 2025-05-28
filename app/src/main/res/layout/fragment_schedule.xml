@@ -18,23 +18,38 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="16dp"/>
 
+    <com.google.android.material.switchmaterial.SwitchMaterial
+        android:id="@+id/switchActivateAllSchedules"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="16dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:text="Activar Todos los Horarios"
+        android:textSize="18sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/textview_schedule_title" />
+
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recyclerview_schedules"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        app:layout_constraintTop_toBottomOf="@id/textview_schedule_title"
-        app:layout_constraintBottom_toTopOf="@id/button_add_schedule"
+        app:layout_constraintTop_toBottomOf="@id/switchActivateAllSchedules" app:layout_constraintBottom_toTopOf="@id/button_add_schedule"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginTop="16dp"
-        android:layout_marginBottom="16dp"
+        android:layout_marginTop="8dp" android:layout_marginBottom="16dp"
         tools:listitem="@layout/item_schedule_layout" />
+
     <TextView
         android:id="@+id/textview_no_schedules"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="No hay horarios configurados."
-        android:visibility="gone" app:layout_constraintTop_toTopOf="@id/recyclerview_schedules"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/recyclerview_schedules"
         app:layout_constraintBottom_toBottomOf="@id/recyclerview_schedules"
         app:layout_constraintStart_toStartOf="@id/recyclerview_schedules"
         app:layout_constraintEnd_toEndOf="@id/recyclerview_schedules" />
@@ -45,7 +60,8 @@
         android:layout_height="wrap_content"
         android:layout_margin="16dp"
         android:contentDescription="Añadir nuevo horario"
-        app:srcCompat="@drawable/ic_add" app:layout_constraintBottom_toBottomOf="parent"
+        app:srcCompat="@drawable/ic_add"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

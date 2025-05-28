@@ -1,29 +1,27 @@
 package com.example.ishade
 
-import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import androidx.fragment.app.Fragment
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
+//import android.widget.Toast
+import androidx.fragment.app.activityViewModels // Importar para activityViewModels
+//import androidx.lifecycle.Observer                 // Importar para Observer
 import com.example.ishade.databinding.FragmentAutomaticBinding
-import org.eclipse.paho.android.service.MqttAndroidClient
-import org.eclipse.paho.client.mqttv3.*
+// Ya no necesitas las importaciones directas de Paho aquí
 
 class AutomaticFragment : Fragment() {
 
     private var _binding: FragmentAutomaticBinding? = null
     private val binding get() = _binding!!
 
-    private lateinit var mqttClient: MqttAndroidClient
+    // Obtener instancia del ViewModel compartido
+    private val modeViewModel: ModeViewModel by activityViewModels()
 
-    // Configuración MQTT (ajusta la IP si es necesario)
-    private val brokerUri = "tcp://192.168.0.8:1883" // IP de tu PC con Mosquitto
-    private val clientId = "ishadeAppAutomatic-${System.currentTimeMillis()}"
     private val topicSensorLuz = "sensor/luz" // Topic para recibir datos del sensor
-    private val topicControl = "cortina/control" // Topic para enviar comandos de modo
+    // topicControl para enviar "AUTO" / "AUTO_OFF" se manejará vía ModeViewModel -> MqttHandler
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -31,7 +29,6 @@ class AutomaticFragment : Fragment() {
     ): View {
         Log.d("AutomaticFragment", "onCreateView")
         _binding = FragmentAutomaticBinding.inflate(inflater, container, false)
-        setupMqttClient(requireActivity().applicationContext)
         return binding.root
     }
 
@@ -39,208 +36,89 @@ class AutomaticFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         Log.d("AutomaticFragment", "onViewCreated")
 
-        connectMqtt() // Intentar conectar al broker
+        setupObservers()
+        setupListeners()
 
+        // Intentar conectar MQTT si es necesario. MqttHandler maneja si ya está conectado.
+        MqttHandler.connect()
+    }
+
+    private fun setupObservers() {
+        // Observar el estado de activación del Modo Automático desde el ViewModel
+        modeViewModel.isAutomaticModeActive.observe(viewLifecycleOwner) { isActive ->
+            Log.d("AutomaticFragment", "Observado isAutomaticModeActive: $isActive")
+            binding.switchModoAutomatico.isChecked = isActive // Sincronizar el switch de la UI
+            updateUiForModeState(isActive, MqttHandler.isConnected.value ?: false)
+        }
+
+        // Observar el estado de la conexión MQTT desde MqttHandler
+        MqttHandler.isConnected.observe(viewLifecycleOwner) { isConnected ->
+            Log.d("AutomaticFragment", "Observado MqttHandler.isConnected: $isConnected")
+            updateUiForModeState(modeViewModel.isAutomaticModeActive.value ?: false, isConnected)
+        }
+
+        // Observar mensajes MQTT recibidos (para el sensor de luz)
+        MqttHandler.receivedMessage.observe(viewLifecycleOwner) { messagePair ->
+            val topic = messagePair.first
+            val payload = messagePair.second
+
+            // Solo actualizar si el modo automático está activo y el topic es el correcto
+            if (topic == topicSensorLuz && modeViewModel.isAutomaticModeActive.value == true) {
+                Log.d("AutomaticFragment", "Valor de Luz desde MQTT: $payload")
+                binding.textviewLuzValue.text = payload
+            }
+        }
+    }
+
+    private fun setupListeners() {
         binding.switchModoAutomatico.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) {
-                enviarComandoMqtt(topicControl, "AUTO") // Comando para activar modo AUTO en ESP32
-                binding.textviewAutoStatus.text = "Modo Automático Activado"
-                // Aquí podrías querer suscribirte al topic del sensor si no lo hiciste al conectar
-                // o si solo quieres recibir datos cuando el modo está activo.
-                // Por ahora, la suscripción se hace en connectComplete.
-            } else {
-                enviarComandoMqtt(topicControl, "AUTO_OFF") // Comando para desactivar modo AUTO en ESP32
-                binding.textviewAutoStatus.text = "Modo Automático Desactivado"
-                binding.textviewLuzValue.text = "---" // Limpiar valor de luz al desactivar
-            }
-            // TODO: Implementar lógica de gestión de modo global (si AUTO_ON, otros modos se desactivan)
+            Log.d("AutomaticFragment", "Switch Modo Automático cambiado por usuario a: $isChecked")
+            // Notificar al ViewModel sobre el cambio de estado.
+            // El ViewModel se encargará de la lógica de exclusividad y de enviar "AUTO" / "AUTO_OFF"
+            // a través de MqttHandler.
+            modeViewModel.setAutomaticModeActive(isChecked)
         }
     }
 
-    private fun setupMqttClient(context: Context) {
-        Log.d("AutomaticFragment", "setupMqttClient")
-        mqttClient = MqttAndroidClient(context, brokerUri, clientId)
-        mqttClient.setCallback(object : MqttCallbackExtended {
-            override fun connectComplete(reconnect: Boolean, serverURI: String?) {
-                Log.i("MQTT_AutoFrag", "Conexión completa al broker: $serverURI")
-                activity?.runOnUiThread {
-                    Toast.makeText(requireContext(), "Conectado al Broker (Automático)", Toast.LENGTH_SHORT).show()
-                    // Suscribirse al topic del sensor de luz una vez conectados
-                    subscribeToTopic(topicSensorLuz)
-                }
-            }
+    /**
+     * Actualiza la UI (textos, suscripciones MQTT) basado en el estado del modo y la conexión.
+     */
+    private fun updateUiForModeState(isAutoModeActive: Boolean, isMqttConnected: Boolean) {
+        if (!isMqttConnected) {
+            binding.textviewAutoStatus.text = getString(R.string.broker_desconectado) // Usa strings.xml
+            binding.textviewLuzValue.text = "---"
+            MqttHandler.unsubscribeTopic(topicSensorLuz) // Asegurar desuscripción si no estamos conectados
+            return
+        }
 
-            override fun connectionLost(cause: Throwable?) {
-                Log.e("MQTT_AutoFrag", "Conexión perdida: ${cause?.toString()}", cause)
-                activity?.runOnUiThread {
-                    Toast.makeText(requireContext(), "Conexión MQTT perdida (Automático)", Toast.LENGTH_SHORT).show()
-                    binding.textviewLuzValue.text = "Error Broker"
-                    binding.textviewAutoStatus.text = "Broker Desconectado"
-                }
-            }
-
-            override fun messageArrived(topic: String?, message: MqttMessage?) {
-                try {
-                    val payload = message?.payload?.toString(Charsets.UTF_8)
-                    Log.d("MQTT_AutoFrag", "Mensaje recibido en $topic: $payload")
-                    if (topic == topicSensorLuz && payload != null) {
-                        activity?.runOnUiThread {
-                            binding.textviewLuzValue.text = payload
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e("MQTT_AutoFrag", "Error al procesar mensaje: ${e.message}", e)
-                }
-            }
-
-            override fun deliveryComplete(token: IMqttDeliveryToken?) {
-                Log.d("MQTT_AutoFrag", "Entrega de mensaje completa, token: $token")
-            }
-        })
-    }
-
-    private fun connectMqtt() {
-        Log.d("AutomaticFragment", "connectMqtt - Intentando conectar")
-        if (::mqttClient.isInitialized && !mqttClient.isConnected) {
-            try {
-                val options = MqttConnectOptions()
-                options.isAutomaticReconnect = true
-                options.isCleanSession = true
-                mqttClient.connect(options, null, object : IMqttActionListener {
-                    override fun onSuccess(asyncActionToken: IMqttToken?) {
-                        Log.i("MQTT_AutoFrag", "Conexión MQTT iniciada (connect onSuccess).")
-                        // La confirmación visual y suscripción se maneja en connectComplete
-                    }
-
-                    override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
-                        Log.e("MQTT_AutoFrag", "Fallo al iniciar conexión MQTT: ${exception?.message}", exception)
-                        activity?.runOnUiThread {
-                            Toast.makeText(requireContext(), "Fallo al conectar (Automático)", Toast.LENGTH_LONG).show()
-                            binding.textviewLuzValue.text = "Error Broker"
-                            binding.textviewAutoStatus.text = "Error Conexión Broker"
-                        }
-                    }
-                })
-            } catch (e: MqttException) {
-                Log.e("MQTT_AutoFrag", "Excepción MqttException al conectar: ${e.message}", e)
-            }
-        } else if (::mqttClient.isInitialized && mqttClient.isConnected) {
-            Log.i("MQTT_AutoFrag", "Ya conectado. Re-suscribiéndose por si acaso.")
-            subscribeToTopic(topicSensorLuz) // Asegurar suscripción si ya estaba conectado
+        // Si estamos conectados al broker:
+        if (isAutoModeActive) {
+            binding.textviewAutoStatus.text = getString(R.string.auto_mode_activated) // Usa strings.xml
+            MqttHandler.subscribeTopic(topicSensorLuz)
         } else {
-            Log.e("MQTT_AutoFrag", "mqttClient no inicializado antes de conectar.")
+            binding.textviewAutoStatus.text = getString(R.string.auto_mode_deactivated) // Usa strings.xml
+            binding.textviewLuzValue.text = "---" // Limpiar valor de luz al desactivar modo
+            MqttHandler.unsubscribeTopic(topicSensorLuz)
         }
     }
 
-    private fun subscribeToTopic(topic: String, qos: Int = 0) {
-        if (::mqttClient.isInitialized && mqttClient.isConnected) {
-            try {
-                mqttClient.subscribe(topic, qos, null, object : IMqttActionListener {
-                    override fun onSuccess(asyncActionToken: IMqttToken?) {
-                        Log.i("MQTT_AutoFrag", "Suscrito exitosamente a $topic")
-                        activity?.runOnUiThread {
-                            Toast.makeText(requireContext(), "Suscrito a $topic", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-
-                    override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
-                        Log.e("MQTT_AutoFrag", "Fallo al suscribirse a $topic: ${exception?.message}", exception)
-                        activity?.runOnUiThread {
-                            Toast.makeText(requireContext(), "Fallo al suscribir a $topic", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                })
-            } catch (e: MqttException) {
-                Log.e("MQTT_AutoFrag", "Excepción MqttException al suscribir: ${e.message}", e)
-            }
-        } else {
-            Log.w("MQTT_AutoFrag", "No se puede suscribir, cliente no conectado o no inicializado.")
-        }
-    }
-
-    private fun enviarComandoMqtt(topic: String, comando: String, qos: Int = 1) {
-        if (::mqttClient.isInitialized && mqttClient.isConnected) {
-            try {
-                val message = MqttMessage()
-                message.payload = comando.toByteArray(Charsets.UTF_8)
-                message.qos = qos
-                message.isRetained = false
-                mqttClient.publish(topic, message, null, object : IMqttActionListener {
-                    override fun onSuccess(asyncActionToken: IMqttToken?) {
-                        Log.i("MQTT_AutoFrag", "Comando '$comando' publicado a $topic")
-                    }
-
-                    override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
-                        Log.e("MQTT_AutoFrag", "Fallo al publicar '$comando': ${exception?.message}", exception)
-                        activity?.runOnUiThread {
-                            Toast.makeText(requireContext(), "Error al enviar comando AUTO", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                })
-            } catch (e: MqttException) {
-                Log.e("MQTT_AutoFrag", "Excepción MqttException al publicar: ${e.message}", e)
-            }
-        } else {
-            Log.w("MQTT_AutoFrag", "No se puede enviar comando '$comando', cliente no conectado.")
-            Toast.makeText(requireContext(), "No conectado al Broker (Automático)", Toast.LENGTH_SHORT).show()
-        }
-    }
 
     override fun onResume() {
         super.onResume()
-        Log.d("AutomaticFragment", "onResume - Intentando conectar si es necesario")
-        connectMqtt() // Intenta conectar/asegurar conexión cuando el fragmento es visible
+        Log.d("AutomaticFragment", "onResume - Intentando conectar MQTT si es necesario")
+        MqttHandler.connect()
+        // La lógica de suscripción ahora está en updateUiForModeState,
+        // que se dispara por los observers cuando cambian isAutomaticModeActive o isConnected.
     }
 
     override fun onDestroyView() {
-        Log.d("AutomaticFragment", "onDestroyView")
-        // Considera si desuscribirte o desconectar aquí.
-        // Si quieres que la conexión y suscripción persistan mientras la app está abierta
-        // (aunque este fragmento no esté visible), necesitarías una gestión de cliente diferente (Service/ViewModel global).
-        // Por ahora, para simplificar y evitar problemas si el fragmento se recrea mucho,
-        // podríamos desconectar para limpiar.
-        if (::mqttClient.isInitialized && mqttClient.isConnected) {
-            try {
-                // Desuscribirse de los topics antes de desconectar
-                mqttClient.unsubscribe(topicSensorLuz, null, object: IMqttActionListener {
-                    override fun onSuccess(asyncActionToken: IMqttToken?) {
-                        Log.i("MQTT_AutoFrag", "Desuscrito de $topicSensorLuz exitosamente.")
-                        // Proceder a desconectar después de desuscribir exitosamente
-                        disconnectMqttClient()
-                    }
-                    override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
-                        Log.e("MQTT_AutoFrag", "Fallo al desuscribir de $topicSensorLuz.", exception)
-                        // Aún así intentar desconectar
-                        disconnectMqttClient()
-                    }
-                })
-            } catch (e: MqttException) {
-                Log.e("MQTT_AutoFrag", "Error al intentar desuscribir/desconectar en onDestroyView", e)
-                disconnectMqttClient() // Asegurar intento de desconexión
-            }
-        }
-        _binding = null
         super.onDestroyView()
+        Log.d("AutomaticFragment", "onDestroyView")
+        // Es una buena práctica desuscribirse de topics específicos de este fragmento
+        // cuando la vista se destruye, para evitar procesar mensajes innecesariamente.
+        // MqttHandler.unsubscribeTopic se encarga de no fallar si no estaba suscrito o no conectado.
+        MqttHandler.unsubscribeTopic(topicSensorLuz)
+        Log.d("AutomaticFragment", "Intentando desuscribir de $topicSensorLuz en onDestroyView")
+        _binding = null // Muy importante
     }
-
-    private fun disconnectMqttClient() {
-        if (::mqttClient.isInitialized && mqttClient.isConnected) {
-            try {
-                Log.d("MQTT_AutoFrag", "Intentando desconectar cliente MQTT...")
-                mqttClient.disconnect(null, object : IMqttActionListener {
-                    override fun onSuccess(asyncActionToken: IMqttToken?) {
-                        Log.i("MQTT_AutoFrag", "Cliente MQTT desconectado exitosamente.")
-                    }
-                    override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
-                        Log.e("MQTT_AutoFrag", "Fallo al desconectar MQTT.", exception)
-                    }
-                })
-            } catch (e: MqttException) {
-                Log.e("MQTT_AutoFrag", "Excepción MqttException al desconectar: ${e.message}", e)
-            }
-        }
-    }
-
-    // Remueve el código de newInstance y ARG_PARAM que venía con la plantilla
-    // si no lo estás usando para pasar argumentos al crear el fragmento.
 }

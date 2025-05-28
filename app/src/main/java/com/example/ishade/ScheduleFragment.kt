@@ -22,11 +22,15 @@ import android.net.Uri
 import android.provider.Settings
 import java.text.SimpleDateFormat
 import java.util.Locale
+import androidx.fragment.app.activityViewModels
+//import androidx.lifecycle.Observer
 
 class ScheduleFragment : Fragment(), AddScheduleDialogFragment.AddScheduleDialogListener {
 
     private var _binding: FragmentScheduleBinding? = null
     private val binding get() = _binding!!
+
+    private val modeViewModel: ModeViewModel by activityViewModels() // ViewModel compartido
 
     private lateinit var scheduleAdapter: ScheduleAdapter
     private val scheduledItemsList = mutableListOf<ScheduleItem>()
@@ -34,6 +38,10 @@ class ScheduleFragment : Fragment(), AddScheduleDialogFragment.AddScheduleDialog
     private val PREFS_NAME = "schedule_prefs"
     private val SCHEDULE_KEY = "schedules_list"
     private val gson = Gson()
+
+    // SDF para logs, asegúrate de importarlo: import java.text.SimpleDateFormat
+    private val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss z", Locale.getDefault())
+
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -48,52 +56,105 @@ class ScheduleFragment : Fragment(), AddScheduleDialogFragment.AddScheduleDialog
         super.onViewCreated(view, savedInstanceState)
         Log.d("ScheduleFragment", "onViewCreated")
 
-        setupRecyclerView()
-        loadSchedulesFromPrefs()
+        setupRecyclerView()      // Configura el RecyclerView y el Adapter
+        loadSchedulesFromPrefs() // Carga los horarios guardados
+        setupMasterSwitchListeners() // Configura el switch maestro y sus observadores
+        setupAddButtonListener() // Configura el listener del botón de añadir
 
-        binding.buttonAddSchedule.setOnClickListener {
-            val dialog = AddScheduleDialogFragment.newInstance()
-            dialog.listener = this
-            dialog.show(parentFragmentManager, AddScheduleDialogFragment.TAG)
-            Log.d("ScheduleFragment", "Botón Añadir Horario presionado, mostrando diálogo.")
+        // La (re)programación inicial de alarmas o su cancelación
+        // se manejará cuando el observer de isScheduledModeActive se dispare por primera vez.
+    }
+
+    private fun setupMasterSwitchListeners() {
+        // Observar el estado del Modo Horarios desde el ViewModel
+        modeViewModel.isScheduledModeActive.observe(viewLifecycleOwner) { isActive ->
+            Log.i("ScheduleFragment", "Observer: Modo Horarios Programados globalmente -> $isActive")
+            if (binding.switchActivateAllSchedules.isChecked != isActive) {
+                binding.switchActivateAllSchedules.isChecked = isActive
+            }
+            updateUiBasedOnMasterSwitch(isActive)
+
+            if (isActive) {
+                Log.i("ScheduleFragment", "Modo Horarios activado. (Re)programando alarmas habilitadas...")
+                reprogramAllEnabledSchedules()
+            } else {
+                Log.i("ScheduleFragment", "Modo Horarios desactivado. Cancelando todas las alarmas programadas...")
+                cancelAllProgrammedSchedules()
+            }
+        }
+
+        // Listener para cuando el usuario cambia el switch maestro manualmente
+        binding.switchActivateAllSchedules.setOnCheckedChangeListener { _, isChecked ->
+            // Solo actuar si el cambio es realmente del usuario y diferente al estado actual del ViewModel,
+            // para evitar bucles si el ViewModel actualiza el switch.
+            if (modeViewModel.isScheduledModeActive.value != isChecked) {
+                Log.d("ScheduleFragment", "Switch Maestro de Horarios cambiado por usuario a: $isChecked")
+                modeViewModel.setScheduledModeActive(isChecked)
+            }
+            // El observer de arriba se encargará de (re)programar o cancelar las alarmas.
+        }
+    }
+
+    private fun updateUiBasedOnMasterSwitch(isMasterSwitchActive: Boolean) {
+        Log.d("ScheduleFragment", "Actualizando UI basada en switch maestro: $isMasterSwitchActive")
+        // Habilitar/deshabilitar la interacción con la lista y el botón de añadir
+        binding.recyclerviewSchedules.alpha = if (isMasterSwitchActive) 1.0f else 0.5f
+        binding.buttonAddSchedule.isEnabled = isMasterSwitchActive
+
+        // Notificar al adapter para que pueda habilitar/deshabilitar sus elementos internos
+        if (::scheduleAdapter.isInitialized) { // Asegurarse que el adapter ya fue creado
+            scheduleAdapter.setInteractionsEnabled(isMasterSwitchActive)
         }
     }
 
     private fun setupRecyclerView() {
         Log.d("ScheduleFragment", "setupRecyclerView")
         scheduleAdapter = ScheduleAdapter(
-            ArrayList(scheduledItemsList),
+            ArrayList(scheduledItemsList), // Iniciar con la lista actual (puede estar vacía)
             onScheduleToggle = { scheduleItem, isEnabled ->
+                if (modeViewModel.isScheduledModeActive.value != true) {
+                    Toast.makeText(requireContext(), "Active el interruptor general de horarios para modificar.", Toast.LENGTH_SHORT).show()
+                    // Revertir el cambio visual del switch individual
+                    val position = scheduledItemsList.indexOf(scheduleItem)
+                    if (position != -1) scheduleAdapter.notifyItemChanged(position)
+                    return@ScheduleAdapter
+                }
+
                 val itemIndex = scheduledItemsList.indexOfFirst { it.id == scheduleItem.id }
                 if (itemIndex != -1) {
                     scheduledItemsList[itemIndex].isEnabled = isEnabled
-                    saveSchedulesToPrefs() // Guardar el cambio de estado
+                    saveSchedulesToPrefs()
                     if (isEnabled) {
-                        setAlarm(scheduledItemsList[itemIndex]) // Programar si se activa
+                        Log.d("ScheduleFragment", "Programando alarma individualmente para ID ${scheduleItem.id}")
+                        setAlarm(scheduledItemsList[itemIndex])
                     } else {
-                        cancelAlarm(scheduledItemsList[itemIndex]) // Cancelar si se desactiva
+                        Log.d("ScheduleFragment", "Cancelando alarma individualmente para ID ${scheduleItem.id}")
+                        cancelAlarm(scheduledItemsList[itemIndex])
                     }
-                    val status = if (isEnabled) "activado" else "desactivado"
-                    Toast.makeText(requireContext(), "Horario ${scheduleItem.getTimeString()} ${status}", Toast.LENGTH_SHORT).show()
-                    Log.d("ScheduleFragment", "Horario ${scheduleItem.id} toggle: $isEnabled")
+                    val status = if (isEnabled) "habilitado" else "deshabilitado"
+                    Toast.makeText(requireContext(), "Horario ${scheduleItem.getTimeString()} $status", Toast.LENGTH_SHORT).show()
                 }
             },
             onEditClick = { scheduleItem ->
-                // TODO: Abrir diálogo para editar este scheduleItem
+                if (modeViewModel.isScheduledModeActive.value != true) {
+                    Toast.makeText(requireContext(), "Active el interruptor general de horarios para editar.", Toast.LENGTH_SHORT).show()
+                    return@ScheduleAdapter
+                }
+                Log.d("ScheduleFragment", "Click Editar para ID ${scheduleItem.id} (TODO: Implementar)")
                 Toast.makeText(requireContext(), "Editar horario: ${scheduleItem.getTimeString()} (pendiente)", Toast.LENGTH_SHORT).show()
-                Log.d("ScheduleFragment", "Editar horario: ${scheduleItem.id}")
             },
             onDeleteClick = { scheduleItem ->
-                Toast.makeText(requireContext(), "Eliminar horario: ${scheduleItem.getTimeString()}", Toast.LENGTH_SHORT).show()
-                Log.d("ScheduleFragment", "Eliminar horario: ${scheduleItem.id}")
-
+                // Borrar se permite incluso si el switch maestro está apagado,
+                // ya que la alarma correspondiente se cancelará de todas formas.
+                Log.d("ScheduleFragment", "Click Borrar para ID ${scheduleItem.id}")
                 val position = scheduledItemsList.indexOfFirst { it.id == scheduleItem.id }
                 if (position != -1) {
                     val removedItem = scheduledItemsList.removeAt(position)
-                    scheduleAdapter.updateSchedules(ArrayList(scheduledItemsList))
+                    scheduleAdapter.updateSchedules(ArrayList(scheduledItemsList)) // Notificar al adapter del cambio
                     updateEmptyViewVisibility()
-                    saveSchedulesToPrefs() // Guardar la lista sin el ítem
-                    cancelAlarm(removedItem) // Cancelar la alarma del ítem eliminado
+                    saveSchedulesToPrefs()
+                    cancelAlarm(removedItem) // Siempre cancelar la alarma al borrar un item
+                    Toast.makeText(requireContext(), "Horario ${removedItem.getTimeString()} eliminado", Toast.LENGTH_SHORT).show()
                 }
             }
         )
@@ -101,6 +162,70 @@ class ScheduleFragment : Fragment(), AddScheduleDialogFragment.AddScheduleDialog
             layoutManager = LinearLayoutManager(requireContext())
             adapter = scheduleAdapter
         }
+    }
+
+    private fun setupAddButtonListener() {
+        binding.buttonAddSchedule.setOnClickListener {
+            if (modeViewModel.isScheduledModeActive.value != true) {
+                Toast.makeText(requireContext(), "Active el interruptor general de horarios para añadir.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val dialog = AddScheduleDialogFragment.newInstance()
+            dialog.listener = this
+            dialog.show(parentFragmentManager, AddScheduleDialogFragment.TAG)
+        }
+    }
+
+    private fun reprogramAllEnabledSchedules() {
+        Log.i("ScheduleFragment", "Reprogramando todas las alarmas que están habilitadas individualmente...")
+        if (MqttHandler.isConnected.value != true) {
+            Log.w("ScheduleFragment", "Broker no conectado. Las alarmas se programarán pero podrían no actuar si dependen de MQTT al dispararse y no hay conexión en ese momento.")
+            // No se impide la programación, ya que la conexión podría restablecerse.
+        }
+        for (item in scheduledItemsList) {
+            if (item.isEnabled) {
+                setAlarm(item)
+            } else {
+                // Asegurarse de que las alarmas para items no habilitados estén canceladas
+                cancelAlarm(item)
+            }
+        }
+        Toast.makeText(requireContext(), "Horarios activados y alarmas (re)programadas.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun cancelAllProgrammedSchedules() {
+        Log.i("ScheduleFragment", "Cancelando TODAS las alarmas programadas actualmente.")
+        if (scheduledItemsList.isEmpty() && activity != null) { // Evitar NPE si la lista está vacía y no hay contexto aún
+            Log.d("ScheduleFragment", "No hay horarios en la lista para cancelar.")
+        }
+        for (item in scheduledItemsList) {
+            cancelAlarm(item)
+        }
+        Toast.makeText(requireContext(), "Todos los horarios han sido desactivados.", Toast.LENGTH_SHORT).show()
+    }
+
+    override fun onScheduleAdded(scheduleItem: ScheduleItem) {
+        Log.d("ScheduleFragment", "Nuevo horario añadido: ${scheduleItem.getTimeString()}")
+        // Añadir a la lista y al adapter
+        val existingItemIndex = scheduledItemsList.indexOfFirst { it.id == scheduleItem.id }
+        if (existingItemIndex != -1) {
+            scheduledItemsList[existingItemIndex] = scheduleItem // Actualizar si ya existe (para edición futura)
+        } else {
+            scheduledItemsList.add(scheduleItem)
+        }
+        scheduleAdapter.updateSchedules(ArrayList(scheduledItemsList))
+        updateEmptyViewVisibility()
+        saveSchedulesToPrefs()
+
+        // Solo programar la nueva alarma si el switch maestro de horarios está activado
+        // y el propio item está habilitado (isEnabled es true por defecto para nuevos items)
+        if (modeViewModel.isScheduledModeActive.value == true && scheduleItem.isEnabled) {
+            Log.d("ScheduleFragment", "Programando nueva alarma añadida ID ${scheduleItem.id}")
+            setAlarm(scheduleItem)
+        } else {
+            Log.d("ScheduleFragment", "El modo Horarios está desactivado o el item no está habilitado. La nueva alarma ID ${scheduleItem.id} no se programará ahora.")
+        }
+        Toast.makeText(requireContext(), "Nuevo horario añadido", Toast.LENGTH_SHORT).show()
     }
 
     private fun updateEmptyViewVisibility() {
@@ -117,19 +242,6 @@ class ScheduleFragment : Fragment(), AddScheduleDialogFragment.AddScheduleDialog
         super.onDestroyView()
         Log.d("ScheduleFragment", "onDestroyView")
         _binding = null
-    }
-
-    override fun onScheduleAdded(scheduleItem: ScheduleItem) {
-        Log.d("ScheduleFragment", "Nuevo horario recibido: ${scheduleItem.getTimeString()} - ${scheduleItem.positionPercent}%")
-        scheduledItemsList.add(scheduleItem)
-        scheduleAdapter.updateSchedules(ArrayList(scheduledItemsList))
-        updateEmptyViewVisibility()
-        saveSchedulesToPrefs() // Guardar la lista actualizada
-
-        if (scheduleItem.isEnabled) { // Solo programar alarma si el horario está habilitado al crearse
-            setAlarm(scheduleItem)
-        }
-        Toast.makeText(requireContext(), "Nuevo horario añadido", Toast.LENGTH_SHORT).show()
     }
 
     private fun saveSchedulesToPrefs() {

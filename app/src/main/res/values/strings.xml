@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">iShade</string>
+    <string name="app_name">RollIt</string>
     <string name="action_settings">Settings</string>
     <string name="modo_automatico">Modo Automático</string>
     <string name="modo_manual">Modo Manual</string>

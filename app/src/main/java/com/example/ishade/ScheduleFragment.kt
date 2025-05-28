@@ -167,50 +167,79 @@ class ScheduleFragment : Fragment(), AddScheduleDialogFragment.AddScheduleDialog
     }
 
     private fun setAlarm(scheduleItem: ScheduleItem) {
-        // Formateador de fechas para logs
-        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-
-        if (!scheduleItem.isEnabled) {
-            Log.d("ScheduleFragment", "Horario ID ${scheduleItem.id} (${scheduleItem.getTimeString()}) no está habilitado, no se programa alarma.")
-            cancelAlarm(scheduleItem)
-            return
-        }
-
-        // Asumimos que scheduleItem.daysOfWeek es Set<Int> con constantes de Calendar.DAY_OF_WEEK
-        if (scheduleItem.daysOfWeek.isEmpty()) {
-            Log.d("ScheduleFragment", "Horario ID ${scheduleItem.id} (${scheduleItem.getTimeString()}) no tiene días de repetición, no se programa alarma.")
-            cancelAlarm(scheduleItem)
-            return
-        }
-
+        // Formateador de fechas para logs más detallados
+        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss z", Locale.getDefault())
         val alarmManager = requireActivity().getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-        // Calcular el próximo tiempo de disparo
-        val triggerTimeMillis = ScheduleItem.calculateNextTriggerTimeInMillis( // <--- LLAMADA ACTUALIZADA
-            hour = scheduleItem.hour,
-            minute = scheduleItem.minute,
-            selectedDaysOfWeek = scheduleItem.daysOfWeek
-            // Aquí no pasamos baseCalendar, así que usará Calendar.getInstance() por defecto,
-            // lo cual es correcto para cuando se programa una alarma por primera vez desde el Fragment.
-        )
+        if (!scheduleItem.isEnabled) {
+            Log.d("ScheduleFragment", "Horario ID ${scheduleItem.id} (${scheduleItem.getTimeString()}) no está habilitado, cancelando cualquier alarma existente.")
+            cancelAlarm(scheduleItem)
+            return
+        }
+
+        var triggerTimeMillis: Long? = null
+        val intentAction = "com.example.ishade.SCHEDULE_ALARM.${scheduleItem.id}"
+        // Usamos un Bundle para organizar los extras que irán al Intent
+        val intentExtras = Bundle().apply {
+            putLong("SCHEDULE_ID", scheduleItem.id)
+            putInt("POSITION_PERCENT", scheduleItem.positionPercent)
+            putString("TIME_STRING", scheduleItem.getTimeString())
+        }
+        var alarmTypeForDisplay = "" // Para logs y Toasts
+
+        if (scheduleItem.daysOfWeek.isNotEmpty()) { // CASO: "Todos los días"
+            alarmTypeForDisplay = "Todos los días"
+            Log.d("ScheduleFragment", "Programando alarma '$alarmTypeForDisplay' para ID ${scheduleItem.id}")
+
+            triggerTimeMillis = ScheduleItem.calculateNextTriggerTimeInMillis(
+                hour = scheduleItem.hour,
+                minute = scheduleItem.minute,
+                selectedDaysOfWeek = scheduleItem.daysOfWeek
+                // baseCalendar por defecto es Calendar.getInstance(), lo cual es correcto aquí.
+            )
+            // Para "Todos los días", pasamos el array de días para que se reprograme.
+            intentExtras.putIntArray("DAYS_OF_WEEK", scheduleItem.daysOfWeek.toIntArray())
+
+        } else { // CASO: "Solo para el día de hoy" (scheduleItem.daysOfWeek está vacío)
+            alarmTypeForDisplay = "Solo hoy"
+            Log.d("ScheduleFragment", "Programando alarma '$alarmTypeForDisplay' para ID ${scheduleItem.id}")
+
+            val calendarToday = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, scheduleItem.hour)
+                set(Calendar.MINUTE, scheduleItem.minute)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+
+            if (calendarToday.after(Calendar.getInstance())) { // Comprobar si la hora es futura para hoy
+                triggerTimeMillis = calendarToday.timeInMillis
+                // Para "Solo hoy", explícitamente pasamos un IntArray vacío para DAYS_OF_WEEK.
+                // El receiver lo interpretará como "no reprogramar".
+                intentExtras.putIntArray("DAYS_OF_WEEK", intArrayOf())
+            } else {
+                val currentTimeFormatted = sdf.format(Calendar.getInstance().time)
+                Log.w("ScheduleFragment", "La hora ${scheduleItem.getTimeString()} para '$alarmTypeForDisplay' (ID ${scheduleItem.id}) ya pasó hoy (actual: $currentTimeFormatted). No se programará.")
+                Toast.makeText(requireContext(), "La hora para '$alarmTypeForDisplay' (${scheduleItem.getTimeString()}) ya pasó hoy.", Toast.LENGTH_LONG).show()
+                // No se programa; triggerTimeMillis permanecerá null.
+            }
+        }
 
         if (triggerTimeMillis == null) {
-            Log.e("ScheduleFragment", "No se pudo calcular el tiempo de activación para el horario ID ${scheduleItem.id}. No se programará la alarma.")
-            Toast.makeText(requireContext(), "Error al calcular la hora del horario.", Toast.LENGTH_SHORT).show()
-            return
+            Log.e("ScheduleFragment", "No se pudo determinar un tiempo de activación válido para el horario ID ${scheduleItem.id} ($alarmTypeForDisplay).")
+            // El Toast de "hora pasada" (si fue el caso para 'Solo hoy') ya se mostró.
+            // Mostrar un error genérico solo si fue por otra causa (ej. para 'Todos los días').
+            if (scheduleItem.daysOfWeek.isNotEmpty()) {
+                Toast.makeText(requireContext(), "Error al calcular la hora para el horario '$alarmTypeForDisplay'.", Toast.LENGTH_SHORT).show()
+            }
+            return // No continuar si no hay tiempo de activación.
         }
 
         val intent = Intent(requireContext(), ScheduleAlarmReceiver::class.java).apply {
-            action = "com.example.ishade.SCHEDULE_ALARM.${scheduleItem.id}"
-            putExtra("SCHEDULE_ID", scheduleItem.id)
-            putExtra("POSITION_PERCENT", scheduleItem.positionPercent)
-            putExtra("TIME_STRING", scheduleItem.getTimeString()) // Hora original para mostrar
-            // Pasa el conjunto de días seleccionados para que el receiver pueda reprogramar correctamente.
-            // Convertimos el Set<Int> a IntArray para pasarlo en el Intent.
-            putExtra("DAYS_OF_WEEK", scheduleItem.daysOfWeek.toIntArray())
+            action = intentAction
+            putExtras(intentExtras) // Añadir todos los extras desde el Bundle.
         }
 
-        val requestCode = scheduleItem.id.toInt() // Considera una estrategia de ID más robusta si los IDs son Longs muy grandes.
+        val requestCode = scheduleItem.id.toInt()
         val pendingIntent = PendingIntent.getBroadcast(
             requireContext(),
             requestCode,
@@ -219,43 +248,33 @@ class ScheduleFragment : Fragment(), AddScheduleDialogFragment.AddScheduleDialog
         )
 
         try {
-            // CRÍTICO para Android 12 (S) y superior, especialmente en Android 14.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
-                Log.w("ScheduleFragment", "PERMISO REQUERIDO: La app no tiene permiso para programar alarmas exactas. ID Horario: ${scheduleItem.id}.")
-                Toast.makeText(requireContext(), "Permiso para alarmas exactas necesario. Por favor, habilítalo en ajustes.", Toast.LENGTH_LONG).show()
-
-                // Intenta guiar al usuario a los ajustes de la app para que pueda otorgar el permiso.
-                // Esto puede variar ligeramente entre versiones de Android y fabricantes.
+                Log.w("ScheduleFragment", "PERMISO REQUERIDO para programar alarma exacta (ID ${scheduleItem.id}). La app no tiene permiso.")
+                Toast.makeText(requireContext(), "Permiso para alarmas exactas necesario. Por favor, habilítalo en los ajustes de la app.", Toast.LENGTH_LONG).show()
                 try {
-                    // Para API 31 (Android 12) se introdujo ACTION_REQUEST_SCHEDULE_EXACT_ALARM
-                    // pero puede que no esté disponible o no funcione en todos los casos si targetSdk es bajo.
-                    // Una opción más genérica es abrir los detalles de la app.
                     val settingsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                     settingsIntent.data = Uri.fromParts("package", requireContext().packageName, null)
                     settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    startActivity(settingsIntent) // O mostrar un diálogo con estas instrucciones
+                    requireContext().startActivity(settingsIntent) // Usar requireContext() desde un Fragment
                     Log.i("ScheduleFragment","Intentando abrir ajustes de la app para permisos de alarma.")
                 } catch (e: Exception) {
-                    Log.e("ScheduleFragment", "Error al intentar abrir ajustes de permisos.", e)
+                    Log.e("ScheduleFragment", "Error al intentar abrir ajustes de permisos de alarma.", e)
                     Toast.makeText(requireContext(), "Por favor, habilita manualmente el permiso 'Alarmas y recordatorios' en los ajustes de la app.", Toast.LENGTH_LONG).show()
                 }
-                // NO programes la alarma si no tienes el permiso, ya que no funcionará o será impredecible.
-                // Opcionalmente, podrías usar una alarma no exacta aquí como fallback si el diseño lo permite.
-                return // Salir para no intentar programar una alarma exacta sin permiso.
+                return // No intentar programar la alarma si no hay permiso.
             }
 
-            alarmManager.setExactAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP,
-                triggerTimeMillis,
-                pendingIntent
-            )
+            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTimeMillis, pendingIntent)
 
-            val triggerTimeCalendar = Calendar.getInstance().apply { timeInMillis = triggerTimeMillis }
-            Log.i("ScheduleFragment", "Alarma EXACTA programada para ID ${scheduleItem.id} (${scheduleItem.getTimeString()}). Próxima activación: ${sdf.format(triggerTimeCalendar.time)} (Epoch: $triggerTimeMillis)")
-            Toast.makeText(requireContext(), "Horario para ${scheduleItem.getTimeString()} programado (${ScheduleItem.formatSelectedDays(scheduleItem.daysOfWeek, Locale.getDefault())})", Toast.LENGTH_LONG).show()
+            val triggerTimeCalendar = Calendar.getInstance().apply { timeInMillis = triggerTimeMillis!! } // triggerTimeMillis no será null aquí.
+            // Usamos la función de ScheduleItem para formatear los días para el Toast y el Log.
+            val formattedDaysForToast = ScheduleItem.formatSelectedDays(scheduleItem.daysOfWeek, Locale.getDefault())
+            Log.i("ScheduleFragment", "Alarma EXACTA ($alarmTypeForDisplay) programada para ID ${scheduleItem.id} (${scheduleItem.getTimeString()}). Próxima activación: ${sdf.format(triggerTimeCalendar.time)} (Epoch: $triggerTimeMillis). Días: $formattedDaysForToast")
+            Toast.makeText(requireContext(), "Horario ($alarmTypeForDisplay) para ${scheduleItem.getTimeString()} programado ($formattedDaysForToast)", Toast.LENGTH_LONG).show()
+
         } catch (e: SecurityException) {
             Log.e("ScheduleFragment", "SecurityException al programar alarma exacta para ID ${scheduleItem.id}. El permiso puede haber sido revocado.", e)
-            Toast.makeText(requireContext(), "Error de seguridad al programar alarma. Verifica los permisos.", Toast.LENGTH_LONG).show()
+            Toast.makeText(requireContext(), "Error de seguridad al programar la alarma. Verifica los permisos de la aplicación.", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Log.e("ScheduleFragment", "Excepción general al programar alarma para ID ${scheduleItem.id}.", e)
             Toast.makeText(requireContext(), "Error inesperado al programar horario.", Toast.LENGTH_SHORT).show()

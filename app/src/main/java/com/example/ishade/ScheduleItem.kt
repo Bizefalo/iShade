@@ -84,7 +84,7 @@ data class ScheduleItem(
          * @return Una cadena representando los días seleccionados.
          */
         fun formatSelectedDays(daysOfWeek: Set<Int>, locale: Locale = Locale.getDefault()): String {
-            if (daysOfWeek.isEmpty()) return "Nunca" // Considera usar recursos de strings para localización
+            if (daysOfWeek.isEmpty()) return "Solo Hoy" // Considera usar recursos de strings para localización
             if (daysOfWeek.size == 7) return "Todos los días"
 
             val calendar = Calendar.getInstance(locale)

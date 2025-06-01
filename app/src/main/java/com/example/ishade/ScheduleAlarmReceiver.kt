@@ -43,9 +43,25 @@ class ScheduleAlarmReceiver : BroadcastReceiver() {
         if (scheduleId != -1L && positionPercent != -1) {
             // PASO 1: Ejecutar la acción programada
             // --------------------------------------------------
-            val mqttCommand = "SETPOS_$positionPercent" // Comando MQTT de ejemplo
-            Log.i(TAG, "ACCIÓN PROGRAMADA: Mover cortina a $positionPercent%. (Comando MQTT simulado: $mqttCommand). ID del Horario: $scheduleId")
+            val payloadDelComandoMqtt = "SETPOS_$positionPercent"
+            val topicDeControl = "cortina/control" // Este es el topic al que tu ESP32 está suscrito
+            Log.i(TAG, "ACCIÓN PROGRAMADA: Mover cortina a $positionPercent%. (Comando MQTT simulado: $payloadDelComandoMqtt). ID del Horario: $scheduleId")
 
+            // Usar MqttHandler para publicar el mensaje
+            if (MqttHandler.isConnected.value == true) {
+                MqttHandler.publishMessage(topicDeControl, payloadDelComandoMqtt, qos = 1, retained = false)
+                // Puedes ajustar qos y retained según tus necesidades.
+                // qos = 1 asegura "al menos una vez" la entrega.
+            } else {
+                Log.w(TAG, "Broker MQTT no conectado. No se puede enviar comando para el horario ID: $scheduleId. El comando era: '$payloadDelComandoMqtt'")
+                // Consideraciones:
+                // 1. MqttHandler tiene reconexión automática, así que podría conectarse pronto.
+                // 2. Para una funcionalidad crítica, podrías implementar una cola de mensajes pendientes
+                //    o usar WorkManager para garantizar el envío, pero eso añade complejidad.
+                // 3. Para este proyecto, si la conexión se pierde justo en este momento,
+                //    la alarma se disparó, pero el comando no se envió. Un log de advertencia es un buen comienzo.
+                //    Podrías considerar mostrar una notificación al usuario si el envío falla repetidamente.
+            }
             // TODO: Aquí es donde implementarías el envío real del comando MQTT.
             // Si la operación de red es muy corta, podría hacerse directamente.
             // Para operaciones más largas o si la app puede no estar activa,

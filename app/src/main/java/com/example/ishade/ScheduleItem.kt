@@ -1,10 +1,13 @@
 package com.example.ishade
 
 import android.util.Log // Necesario para los logs en las funciones de utilidad
+import kotlinx.parcelize.Parcelize
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import android.os.Parcelable
 
+@Parcelize
 data class ScheduleItem(
     val id: Long = System.currentTimeMillis(), // ID único, usamos timestamp por simplicidad ahora
     val hour: Int,                             // Hora (0-23)
@@ -12,7 +15,7 @@ data class ScheduleItem(
     val positionPercent: Int,                  // Posición de la cortina (0, 25, 50, 75, 100)
     val daysOfWeek: Set<Int>,                  // Conjunto de enteros para los días (ej. Calendar.MONDAY, Calendar.TUESDAY)
     var isEnabled: Boolean = true              // Si el horario está activo o no, por defecto true
-) {
+) : Parcelable {
     // Función para obtener la hora formateada (la dejamos aquí ya que es específica de la instancia)
     fun getTimeString(): String {
         return String.format("%02d:%02d", hour, minute)

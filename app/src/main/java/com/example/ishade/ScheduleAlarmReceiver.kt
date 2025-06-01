@@ -11,6 +11,11 @@ import android.util.Log
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.workDataOf
+import androidx.work.Constraints
+import androidx.work.NetworkType
+import androidx.work.WorkManager
 
 class ScheduleAlarmReceiver : BroadcastReceiver() {
 
@@ -45,30 +50,33 @@ class ScheduleAlarmReceiver : BroadcastReceiver() {
             // --------------------------------------------------
             val payloadDelComandoMqtt = "SETPOS_$positionPercent"
             val topicDeControl = "cortina/control" // Este es el topic al que tu ESP32 está suscrito
+            Log.i(TAG, "ACCIÓN PROGRAMADA: ID Horario: $scheduleId. Intentando enviar MQTT: '$payloadDelComandoMqtt' al topic '$topicDeControl'")
             Log.i(TAG, "ACCIÓN PROGRAMADA: Mover cortina a $positionPercent%. (Comando MQTT simulado: $payloadDelComandoMqtt). ID del Horario: $scheduleId")
 
-            // Usar MqttHandler para publicar el mensaje
-            if (MqttHandler.isConnected.value == true) {
-                MqttHandler.publishMessage(topicDeControl, payloadDelComandoMqtt, qos = 1, retained = false)
-                // Puedes ajustar qos y retained según tus necesidades.
-                // qos = 1 asegura "al menos una vez" la entrega.
-            } else {
-                Log.w(TAG, "Broker MQTT no conectado. No se puede enviar comando para el horario ID: $scheduleId. El comando era: '$payloadDelComandoMqtt'")
-                // Consideraciones:
-                // 1. MqttHandler tiene reconexión automática, así que podría conectarse pronto.
-                // 2. Para una funcionalidad crítica, podrías implementar una cola de mensajes pendientes
-                //    o usar WorkManager para garantizar el envío, pero eso añade complejidad.
-                // 3. Para este proyecto, si la conexión se pierde justo en este momento,
-                //    la alarma se disparó, pero el comando no se envió. Un log de advertencia es un buen comienzo.
-                //    Podrías considerar mostrar una notificación al usuario si el envío falla repetidamente.
-            }
-            // TODO: Aquí es donde implementarías el envío real del comando MQTT.
-            // Si la operación de red es muy corta, podría hacerse directamente.
-            // Para operaciones más largas o si la app puede no estar activa,
-            // considera usar WorkManager o un JobIntentService.
-            // Ejemplo de Toast (si es útil, pero los logs son más fiables para depuración de fondo):
-            // Handler(Looper.getMainLooper()).post { Toast.makeText(context, "Ejecutando Horario: $timeString - Mover a $positionPercent%", Toast.LENGTH_LONG).show() }
+            Log.i(TAG, "ACCIÓN PROGRAMADA: ID Horario: $scheduleId. Encolando trabajo MQTT para enviar: '$payloadDelComandoMqtt' al topic '$topicDeControl'")
 
+            // Crear datos para el Worker
+            val workData = workDataOf(
+                MqttPublishWorker.KEY_TOPIC to topicDeControl,
+                MqttPublishWorker.KEY_PAYLOAD to payloadDelComandoMqtt,
+                MqttPublishWorker.KEY_QOS to 1, // QoS deseado
+                MqttPublishWorker.KEY_RETAINED to false // Retained flag
+            )
+
+            // Crear una WorkRequest
+            val mqttPublishWorkRequest = OneTimeWorkRequestBuilder<MqttPublishWorker>()
+                .setInputData(workData)
+                .setConstraints(Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED) // Solo ejecutar si hay red
+                    .build())
+                // .setInitialDelay(1, TimeUnit.SECONDS) // Opcional: pequeño retraso inicial
+                .addTag("mqtt_publish_schedule") // Tag opcional para identificar el trabajo
+                .build()
+
+            // Encolar el trabajo
+            WorkManager.getInstance(context).enqueue(mqttPublishWorkRequest)
+            Log.d(TAG, "Trabajo MQTT para ID $scheduleId encolado.")
+            // Usar MqttHandler para publicar el mensaje
 
             // PASO 2: Reprogramar la alarma si es necesario
             // --------------------------------------------------

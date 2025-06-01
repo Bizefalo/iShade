@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    id("kotlin-parcelize")
 }
 
 android {
@@ -62,6 +63,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.0") // o la última versión estable
     implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.9.0") // o la última versión estable
     implementation("androidx.fragment:fragment-ktx:1.8.7") // para activityViewModels
+
+    implementation("androidx.work:work-runtime:2.10.1")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

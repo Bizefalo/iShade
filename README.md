@@ -4,8 +4,8 @@
 #include <ArduinoMqttClient.h>
 
 // WiFi
-const char* ssid = "VTR-0486191";
-const char* password = "ns$o2{gn2AL\"#8t=9z";
+const char* ssid = "ssid";
+const char* password = "contraseña";
 
 WiFiClient wifiClient;
 MqttClient mqttClient(wifiClient);

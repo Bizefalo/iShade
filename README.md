@@ -4,8 +4,8 @@
 #include <ArduinoMqttClient.h>
 
 // WiFi
-const char* ssid = "ssid";
-const char* password = "contraseña";
+const char* ssid = "VTR-0486191";
+const char* password = "ns$o2{gn2AL\"#8t=9z";
 
 WiFiClient wifiClient;
 MqttClient mqttClient(wifiClient);
@@ -119,6 +119,30 @@ void messageReceived(int messageSize) {
   } else if (mensaje == "MANUAL") { 
     Serial.println("[MODO] Modo manual explícito seleccionado (automático desactivado).");
     modoAutomaticoActivo = false;
+  } else if (mensaje.startsWith("SETPOS_")) {
+    Serial.println("[MODO HORARIO] Comando de posición SETPOS_X recibido.");
+    modoAutomaticoActivo = false; // Una acción de horario desactiva el modo automático del ESP32
+
+    // Extraer el número del porcentaje del mensaje
+    String porcentajeStr = mensaje.substring(7); // Obtiene la subcadena después de "SETPOS_"
+    int porcentajeDeseado = porcentajeStr.toInt(); // Convierte la subcadena a entero
+
+    Serial.print("[MODO HORARIO] Mover cortina a la posición: ");
+    Serial.print(porcentajeDeseado);
+    Serial.println("%.");
+
+    // TODO MUY IMPORTANTE:
+    // Aquí debes implementar la lógica para comunicarle al Arduino UNO
+    // que mueva el motor de la cortina al 'porcentajeDeseado'.
+    // La forma exacta dependerá de cómo tengas implementada la comunicación
+    // entre el ESP32 y el Arduino (¿Serial, I2C, pines?).
+    // Por ejemplo, si usas Serial para enviar comandos al Arduino:
+    // String comandoParaArduino = "POS:" + String(porcentajeDeseado);
+    // Serial.println(comandoParaArduino); // O la instancia Serial que uses para el Arduino
+
+    // Actualizar la posición conocida internamente en el ESP32
+    posicionCortinaConocidaPorcentaje = porcentajeDeseado;
+    Serial.println("[ACCION ESP32] Orden de mover a porcentaje enviada al Arduino (simulado).");
   } else {
     Serial.println("[MQTT] Comando desconocido recibido.");
   }

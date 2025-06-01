@@ -5,13 +5,13 @@
 
 // WiFi
 const char* ssid = "ssid";
-const char* password = "contraseña";
+const char* password = "contraseña"; // Reemplaza con tu contraseña real
 
 WiFiClient wifiClient;
 MqttClient mqttClient(wifiClient);
 
 // MQTT
-const char broker[] = "192.168.0.8";
+const char broker[] = "192.168.0.8"; // IP de tu PC donde corre Mosquitto
 int port = 1883;
 
 // Tópicos
@@ -21,23 +21,33 @@ const char topic_control[] = "cortina/control";
 // Sensor
 const int pinFotoresistor = 34;
 
-// Tiempo de envío de datos del sensor (y revisión de modo automático)
+// UART para Arduino (Serial2: TX2=GPIO17, RX2=GPIO16 por defecto)
+// Solo usaremos TX2 para enviar al RX del Arduino.
+// El Arduino deberá estar configurado para recibir a esta velocidad de baudios.
+const long ARDUINO_SERIAL_BAUD = 9600;
+
+// Tiempo de envío de datos del sensor
 const long intervalo = 1000; // 1 segundo
 unsigned long tiempoAnterior = 0;
 
 // Variables para el modo automático
 bool modoAutomaticoActivo = false;
-// 'posicionCortinaConocidaPorcentaje' representa la última posición a la que se ordenó moverse.
-// Inicializar a un valor que no sea un porcentaje válido (0-100) para forzar la primera acción.
-// O, si tienes una forma de saber la posición al inicio (ej. siempre empieza cerrada), úsala.
-int posicionCortinaConocidaPorcentaje = 0; // Asumamos que empieza cerrada (0%)
+int posicionCortinaConocidaPorcentaje = 0; // Asumimos que empieza cerrada (0%)
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(115200); // Para depuración con el Monitor Serie
   while (!Serial) {
     delay(10);
   }
   Serial.println("\n[SETUP] Iniciando ESP32...");
+
+  // Inicializar Serial2 para comunicación con Arduino
+  // Usaremos los pines por defecto de Serial2 (TX2: GPIO17, RX2: GPIO16)
+  // Solo necesitamos TX2 para enviar, pero inicializamos ambos por completitud.
+  Serial2.begin(ARDUINO_SERIAL_BAUD);
+  Serial.print("[SETUP] Serial2 (para Arduino) inicializado a ");
+  Serial.print(ARDUINO_SERIAL_BAUD);
+  Serial.println(" baudios.");
 
   WiFi.begin(ssid, password);
   Serial.print("[SETUP] Conectando a WiFi ");
@@ -91,7 +101,7 @@ void messageReceived(int messageSize) {
   Serial.println("\n[MQTT] ----- Mensaje Recibido -----");
   Serial.print("[MQTT] Topic: ");
   Serial.print(mqttClient.messageTopic());
-  // ... (resto de la función messageReceived como la tenías, asegurándote que actualiza modoAutomaticoActivo) ...
+  
   String mensaje = "";
   while (mqttClient.available()) {
     char c = (char)mqttClient.read();
@@ -100,19 +110,32 @@ void messageReceived(int messageSize) {
   Serial.print("[MQTT] Payload: ");
   Serial.println(mensaje);
 
-  if (mensaje == "SUBIR" || mensaje == "BAJAR" || mensaje == "DETENER") {
-    Serial.print("[MODO] Comando manual '");
-    Serial.print(mensaje);
-    Serial.println("' recibido. Desactivando modo automático.");
+  // Comandos para Arduino (con \n para delimitador)
+  String cmdSubir = "U\n";
+  String cmdBajar = "D\n";
+  String cmdDetener = "S\n";
+
+  if (mensaje == "SUBIR") {
+    Serial.print("[MODO] Comando manual 'SUBIR' recibido. Desactivando modo automático.");
+    modoAutomaticoActivo = false;
+    Serial.println("[ACCION] Subiendo cortina...");
+    Serial2.print(cmdSubir);
+    Serial.println("[ESP32->ARDUINO] Enviado: U");
+  } else if (mensaje == "BAJAR") {
+    Serial.print("[MODO] Comando manual 'BAJAR' recibido. Desactivando modo automático.");
+    modoAutomaticoActivo = false;
+    Serial.println("[ACCION] Bajando cortina...");
+    Serial2.print(cmdBajar);
+    Serial.println("[ESP32->ARDUINO] Enviado: D");
+  } else if (mensaje == "DETENER") {
+    Serial.print("[MODO] Comando manual 'DETENER' recibido. Desactivando modo automático.");
     modoAutomaticoActivo = false; 
-    if (mensaje == "SUBIR") Serial.println("[ACCION] Subiendo cortina...");
-    if (mensaje == "BAJAR") Serial.println("[ACCION] Bajando cortina...");
-    if (mensaje == "DETENER") Serial.println("[ACCION] Deteniendo...");
+    Serial.println("[ACCION] Deteniendo...");
+    Serial2.print(cmdDetener);
+    Serial.println("[ESP32->ARDUINO] Enviado: S");
   } else if (mensaje == "AUTO") {
     Serial.println("[MODO] MODO AUTOMÁTICO ACTIVADO desde app.");
     modoAutomaticoActivo = true;
-    // Al activar modo auto, forzamos una evaluación inicial sin importar la última posición auto.
-    // La función controlarCortinaAutomaticamente se encargará de decidir si hay que moverse.
   } else if (mensaje == "AUTO_OFF") {
     Serial.println("[MODO] MODO AUTOMÁTICO DESACTIVADO desde app.");
     modoAutomaticoActivo = false;
@@ -121,28 +144,23 @@ void messageReceived(int messageSize) {
     modoAutomaticoActivo = false;
   } else if (mensaje.startsWith("SETPOS_")) {
     Serial.println("[MODO HORARIO] Comando de posición SETPOS_X recibido.");
-    modoAutomaticoActivo = false; // Una acción de horario desactiva el modo automático del ESP32
+    modoAutomaticoActivo = false; 
 
-    // Extraer el número del porcentaje del mensaje
-    String porcentajeStr = mensaje.substring(7); // Obtiene la subcadena después de "SETPOS_"
-    int porcentajeDeseado = porcentajeStr.toInt(); // Convierte la subcadena a entero
+    String porcentajeStr = mensaje.substring(7); 
+    int porcentajeDeseado = porcentajeStr.toInt();
 
     Serial.print("[MODO HORARIO] Mover cortina a la posición: ");
     Serial.print(porcentajeDeseado);
     Serial.println("%.");
 
-    // TODO MUY IMPORTANTE:
-    // Aquí debes implementar la lógica para comunicarle al Arduino UNO
-    // que mueva el motor de la cortina al 'porcentajeDeseado'.
-    // La forma exacta dependerá de cómo tengas implementada la comunicación
-    // entre el ESP32 y el Arduino (¿Serial, I2C, pines?).
-    // Por ejemplo, si usas Serial para enviar comandos al Arduino:
-    // String comandoParaArduino = "POS:" + String(porcentajeDeseado);
-    // Serial.println(comandoParaArduino); // O la instancia Serial que uses para el Arduino
+    String comandoParaArduino = "P" + String(porcentajeDeseado) + "\n";
+    Serial2.print(comandoParaArduino);
 
-    // Actualizar la posición conocida internamente en el ESP32
+    String logCmd = comandoParaArduino; 
+    logCmd.trim();                      
+    Serial.print("[ESP32->ARDUINO] Enviado: "); Serial.println(logCmd);
+    
     posicionCortinaConocidaPorcentaje = porcentajeDeseado;
-    Serial.println("[ACCION ESP32] Orden de mover a porcentaje enviada al Arduino (simulado).");
   } else {
     Serial.println("[MQTT] Comando desconocido recibido.");
   }
@@ -154,48 +172,45 @@ void controlarCortinaAutomaticamente(int valorLuz) {
     return; 
   }
 
-  int nuevaPosicionDeseadaPorcentaje = posicionCortinaConocidaPorcentaje; // Asumir que no hay cambio inicialmente
-  const int H_OFFSET = 30; // Umbral de histéresis, ajusta este valor según sea necesario
+  int nuevaPosicionDeseadaPorcentaje = posicionCortinaConocidaPorcentaje;
+  const int H_OFFSET = 30; 
 
-  // Determinar la "zona" de luz actual sin histéresis primero
   int zonaLuzPorcentaje = 0;
   if (valorLuz > 2000) zonaLuzPorcentaje = 100;
   else if (valorLuz >= 1300) zonaLuzPorcentaje = 75;
   else if (valorLuz >= 650) zonaLuzPorcentaje = 50;
   else if (valorLuz >= 201) zonaLuzPorcentaje = 25;
-  else zonaLuzPorcentaje = 0; // valorLuz <= 200
+  else zonaLuzPorcentaje = 0;
 
-  // Aplicar histéresis para decidir si cambiamos de la posición actual
   if (zonaLuzPorcentaje > posicionCortinaConocidaPorcentaje) {
-    // Quiere abrir más. ¿Cruzó el umbral inferior de la nueva zona + histéresis?
     if (zonaLuzPorcentaje == 25 && valorLuz > (200 + H_OFFSET)) nuevaPosicionDeseadaPorcentaje = 25;
     else if (zonaLuzPorcentaje == 50 && valorLuz > (650 + H_OFFSET)) nuevaPosicionDeseadaPorcentaje = 50;
     else if (zonaLuzPorcentaje == 75 && valorLuz > (1300 + H_OFFSET)) nuevaPosicionDeseadaPorcentaje = 75;
     else if (zonaLuzPorcentaje == 100 && valorLuz > (2000 + H_OFFSET)) nuevaPosicionDeseadaPorcentaje = 100;
   } else if (zonaLuzPorcentaje < posicionCortinaConocidaPorcentaje) {
-    // Quiere cerrar más. ¿Cruzó el umbral superior de la nueva zona - histéresis?
     if (zonaLuzPorcentaje == 75 && valorLuz < (2000 - H_OFFSET)) nuevaPosicionDeseadaPorcentaje = 75;
     else if (zonaLuzPorcentaje == 50 && valorLuz < (1300 - H_OFFSET)) nuevaPosicionDeseadaPorcentaje = 50;
     else if (zonaLuzPorcentaje == 25 && valorLuz < (650 - H_OFFSET)) nuevaPosicionDeseadaPorcentaje = 25;
     else if (zonaLuzPorcentaje == 0 && valorLuz < (201 - H_OFFSET)) nuevaPosicionDeseadaPorcentaje = 0;
   }
-  // Si zonaLuzPorcentaje == posicionCortinaConocidaPorcentaje, no hacemos nada, ya estamos en la zona correcta.
 
-  // Solo actuar si la posición realmente deseada es diferente de la conocida actual
   if (nuevaPosicionDeseadaPorcentaje != posicionCortinaConocidaPorcentaje) {
     Serial.print("[MODO AUTO] Luz: ");
     Serial.print(valorLuz);
     Serial.print(" -> Mover cortina de ");
-    Serial.print(posicionCortinaConocidaPorcentaje); // La posición ANTES del movimiento
+    Serial.print(posicionCortinaConocidaPorcentaje);
     Serial.print("% a ");
     Serial.print(nuevaPosicionDeseadaPorcentaje);
     Serial.println("%.");
 
-    // AQUÍ IRÍA LA LÓGICA PARA COMANDAR AL ARDUINO UNO
-    // Ejemplo: String comandoParaArduino = "MOVER_A_PORCENTAJE:" + String(nuevaPosicionDeseadaPorcentaje);
-    // Serial.println(comandoParaArduino); // Simulación
+    String comandoParaArduino = "P" + String(nuevaPosicionDeseadaPorcentaje) + "\n";
+    Serial2.print(comandoParaArduino);
 
-    posicionCortinaConocidaPorcentaje = nuevaPosicionDeseadaPorcentaje; // Actualizar la posición conocida DESPUÉS de ordenar el movimiento
+    String logCmdAuto = comandoParaArduino; 
+    logCmdAuto.trim();                      
+    Serial.print("[ESP32->ARDUINO] Modo Auto - Enviado: "); Serial.println(logCmdAuto);
+
+    posicionCortinaConocidaPorcentaje = nuevaPosicionDeseadaPorcentaje;
   }
 }
 
@@ -221,19 +236,14 @@ void loop() {
 
   unsigned long tiempoActual = millis();
   if (tiempoActual - tiempoAnterior >= intervalo) {
-    // Serial.println("\n[LOOP] Intervalo cumplido."); // Podemos comentar esto si hay mucho log
     tiempoAnterior = tiempoActual;
 
     int valorLuz = analogRead(pinFotoresistor);
-    // Serial.print("[SENSOR] Valor de luz: "); // Comentado para reducir logs, pero puedes activarlo
-    // Serial.println(valorLuz);
 
-    // Publicar valor de luz
     mqttClient.beginMessage(topic_luz);
     mqttClient.print(valorLuz);
-    mqttClient.endMessage(); // No es necesario imprimir éxito cada vez si funciona bien
+    mqttClient.endMessage();
 
-    // Llama a la lógica del modo automático si está activo
     if (modoAutomaticoActivo) {
         controlarCortinaAutomaticamente(valorLuz);
     }
